@@ -1,0 +1,13 @@
+[project]
+name = "weather-agent"
+version = "0.1.0"
+description = "A Google ADK weather query agent with DeepSeek API and mock tools"
+requires-python = ">=3.10"
+dependencies = [
+    "google-adk>=1.0.0",
+    "litellm>=1.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools]
+py-modules = ["weather_agent"]
