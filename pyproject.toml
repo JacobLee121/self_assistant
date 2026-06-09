@@ -1,13 +1,14 @@
 [project]
-name = "weather-agent"
-version = "0.1.0"
-description = "A Google ADK weather query agent with DeepSeek API and mock tools"
+name = "self-assistant"
+version = "0.2.0"
+description = "A general-purpose AI assistant using Google ADK + DeepSeek API with local MCP servers for extensible tool capabilities"
 requires-python = ">=3.10"
 dependencies = [
     "google-adk>=1.0.0",
     "litellm>=1.0.0",
     "python-dotenv>=1.0.0",
+    "mcp>=1.0.0",
 ]
 
 [tool.setuptools]
-py-modules = ["weather_agent"]
+py-modules = ["agent"]

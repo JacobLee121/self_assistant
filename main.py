@@ -1,4 +1,7 @@
-"""Main entry point for the Weather Agent demo (DeepSeek API).
+"""通用 AI 助手 — DeepSeek API + Google ADK + 本地 MCP 服务器。
+
+Agent 通过 McpToolset 连接本地 MCP 服务器，自动发现和调用其中的工具。
+工具能力由 agent/config.py 中的 MCP_SERVERS 配置决定，Agent 本身不绑定具体工具。
 
 每轮对话自动记录 LLM 推理和工具调用的完整过程到 logs/ 目录。
 """
@@ -6,6 +9,10 @@
 import asyncio
 import os
 import sys
+import warnings
+
+# 静音 Google ADK 内部实验性功能的调试警告（不影响功能）
+warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 
 from dotenv import load_dotenv
 from google.genai import types
@@ -15,8 +22,8 @@ from google.adk.sessions import InMemorySessionService
 # 启动时自动加载 .env 文件
 load_dotenv()
 
-from weather_agent.agent import weather_agent
-from weather_agent.logger import AgentLogger
+from agent.agent import assistant
+from agent.logger import AgentLogger
 
 # 全局日志记录器
 logger = AgentLogger(log_dir="logs")
@@ -46,7 +53,7 @@ async def main():
     # 1. 创建会话服务（内存版本，不持久化）
     session_service = InMemorySessionService()
     session = await session_service.create_session(
-        app_name="weather_app",
+        app_name="assistant_app",
         user_id="demo_user",
     )
 
@@ -54,15 +61,21 @@ async def main():
 
     # 2. 创建 Runner
     runner = Runner(
-        agent=weather_agent,
-        app_name="weather_app",
+        agent=assistant,
+        app_name="assistant_app",
         session_service=session_service,
     )
 
     # 3. 交互式查询循环
     print("=" * 60)
-    print("🌤️  天气查询助手 (DeepSeek API | 输入 'quit' 退出)")
+    print("🤖 通用 AI 助手 (DeepSeek API + 本地 MCP 工具)")
     print("=" * 60)
+    print("已连接的 MCP 服务：")
+    print("  • weather  — 天气查询 (get_weather)")
+    print("  • route    — 路线规划 (get_route, list_cities)")
+    print()
+    print("输入 'quit' 退出")
+    print("-" * 60)
     print()
 
     while True:
