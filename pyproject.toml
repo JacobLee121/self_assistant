@@ -8,6 +8,10 @@ dependencies = [
     "litellm>=1.0.0",
     "python-dotenv>=1.0.0",
     "mcp>=1.0.0",
+    "langfuse>=4.7.0",
+    "opentelemetry-api>=1.36,<=1.41.1",
+    "opentelemetry-sdk>=1.36,<=1.41.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.36,<=1.41.1",
 ]
 
 [tool.setuptools]

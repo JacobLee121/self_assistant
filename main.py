@@ -14,6 +14,14 @@ import warnings
 # 静音 Google ADK 内部实验性功能的调试警告（不影响功能）
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 
+# LiteLLM 默认会尝试向远端上报指标，网络不通时会超时报错，不影响功能但很碍眼
+os.environ.setdefault("LITELLM_TELEMETRY", "False")
+os.environ.setdefault("OUTDATED_PACKAGE_CHECK", "False")
+# LiteLLM logging worker 会在后台 asyncio 任务超时时报 RED ERROR，
+# 这里将它的日志级别提升到 CRITICAL 来隐藏这些无害的超时错误
+import logging
+logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
+
 from dotenv import load_dotenv
 from google.genai import types
 from google.adk.runners import Runner
@@ -24,9 +32,11 @@ load_dotenv()
 
 from agent.agent import assistant
 from agent.logger import AgentLogger
+from agent.tracing import LangfuseTracer
 
-# 全局日志记录器
+# 全局日志记录器 & Langfuse 追踪器
 logger = AgentLogger(log_dir="logs")
+tracer = LangfuseTracer()
 
 
 def check_api_key() -> bool:
@@ -58,6 +68,7 @@ async def main():
     )
 
     logger.start_session(session.id)
+    tracer.start_session(session.id, user_id="demo_user")
 
     # 2. 创建 Runner
     runner = Runner(
@@ -73,6 +84,7 @@ async def main():
     print("已连接的 MCP 服务：")
     print("  • weather  — 天气查询 (get_weather)")
     print("  • route    — 路线规划 (get_route, list_cities)")
+    print("  • tavily   — 网络搜索 (tavily_search/tavily_extract/tavily_crawl/tavily_map/tavily_research)")
     print()
     print("输入 'quit' 退出")
     print("-" * 60)
@@ -102,6 +114,7 @@ async def main():
         try:
             # ── 开始新的 Turn ──
             logger.start_turn(user_input)
+            tracer.start_turn(user_input, logger._turn_counter)
 
             full_response = []
             async for event in runner.run_async(
@@ -120,9 +133,13 @@ async def main():
                             print(part.text, end="", flush=True)
 
             # ── 结束 Turn，分类 + 统计 token ──
-            logger.end_turn()
+            turn_result = logger.end_turn()
+            tracer.end_turn(turn_result["steps"], turn_result["turn_id"])
             log_path = logger.save()
             print(f"\n\n📝 调用日志已保存: {log_path}")
+            trace_url = tracer.get_trace_url()
+            if trace_url:
+                print(f"🔍 Langfuse 追踪: {trace_url}")
 
         except Exception as e:
             error_msg = str(e)
@@ -137,4 +154,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    finally:
+        tracer.shutdown()

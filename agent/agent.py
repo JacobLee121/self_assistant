@@ -11,6 +11,7 @@
 """
 
 import os
+from datetime import datetime, timezone
 
 from mcp import StdioServerParameters
 from google.adk.agents import Agent
@@ -28,8 +29,12 @@ DEEPSEEK_MODEL = _raw_model
 
 # ── System Instruction ────────────────────────────
 
-SYSTEM_INSTRUCTION = """\
+_CURRENT_DATE = datetime.now(timezone.utc).strftime("%Y 年 %m 月 %d 日")
+
+SYSTEM_INSTRUCTION = f"""\
 你是一个通用的 AI 助手，可以调用各种工具来帮助用户完成任务。
+
+当前日期: {_CURRENT_DATE} (UTC)
 
 工作原则:
 1. 理解用户的意图，选择合适的工具来处理请求

@@ -73,6 +73,7 @@ class AgentLogger:
 
         turn = self._current_turn
         steps = self._build_steps(self._raw_events)
+        steps = self._enrich_tool_inputs(steps)
         turn["steps"] = steps
 
         self.turns.append(turn)
@@ -235,6 +236,33 @@ class AgentLogger:
 
         step["_end_index"] = end_idx
         return step
+
+    # ── 工具输入增强 ────────────────────────────────
+
+    @staticmethod
+    def _enrich_tool_inputs(steps: list[dict]) -> list[dict]:
+        """将 TOOL_RESULT step 的 input 与 LLM_CALL 的 tool_calls 匹配。
+
+        function_response 不包含原始调用参数，需要从 LLM_CALL 的 tool_calls
+        中提取对应的 tool_name → arguments 并填充到 TOOL_RESULT.input。
+        """
+        # 收集所有待匹配的工具调用参数
+        pending_args: dict[str, list[dict]] = {}
+        for step in steps:
+            if step["type"] == "LLM_CALL":
+                for tc in step.get("output", {}).get("tool_calls", []):
+                    name = tc.get("name", "")
+                    args = tc.get("arguments", {})
+                    pending_args.setdefault(name, []).append(args)
+
+        # 填充 TOOL_RESULT 的 input
+        for step in steps:
+            if step["type"] == "TOOL_RESULT":
+                tool_name = step["tool_name"]
+                if tool_name in pending_args and pending_args[tool_name]:
+                    step["input"] = pending_args[tool_name].pop(0)
+
+        return steps
 
     # ── 底层分类 ────────────────────────────────────
 
