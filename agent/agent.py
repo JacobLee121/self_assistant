@@ -10,21 +10,14 @@
   3. MCP 服务器可被任何 MCP 客户端复用（不只是 ADK）
 """
 
-import os
-
-from mcp import StdioServerParameters
 from google.adk.agents import Agent
-from google.adk.models.lite_llm import LiteLlm
 from google.adk.tools.mcp_tool import McpToolset
 
 from .config import MCP_SERVERS
-
-# ── 模型配置 ──────────────────────────────────────
-
-_raw_model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
-if "/" not in _raw_model:
-    _raw_model = f"deepseek/{_raw_model}"
-DEEPSEEK_MODEL = _raw_model
+from .llm_config import create_lite_llm
+from .llm_trace import capture_llm_request
+from .skills import build_skill_toolset
+from .skills import append_project_skills_to_request
 
 # ── System Instruction ────────────────────────────
 
@@ -38,27 +31,41 @@ SYSTEM_INSTRUCTION = """\
 4. 如果缺少必要信息（如城市名），请主动询问
 5. 回复要简洁清晰，适当使用 emoji 和表格增强可读性
 6. 如果用户的请求超出你现有工具的能力范围，诚实告知
+7. 当用户请求与已列出的 skills 匹配时，必须先调用 load_skill 读取对应 skill，再按 skill 指南继续处理
 """
 
-# ── 构建 McpToolset 列表 ─────────────────────────
+# ── 构建工具列表 ─────────────────────────────────
 
-def _build_toolsets() -> list[McpToolset]:
-    """根据 config.py 中的 MCP_SERVERS 配置，创建对应的 McpToolset 列表。
+def _build_tools() -> list:
+    """Create MCP toolsets plus the ADK skill toolset.
 
-    每个 MCP 服务器对应一个 McpToolset，Agent 通过它发现并调用该服务器上的工具。
+    MCP toolsets expose executable tools. SkillToolset exposes project-local
+    instructions through ADK's `list_skills`, `load_skill`, and
+    `load_skill_resource` tools.
     """
-    toolsets: list[McpToolset] = []
+    tools: list = []
     for server_params in MCP_SERVERS:
-        toolset = McpToolset(connection_params=server_params)
-        toolsets.append(toolset)
-    return toolsets
+        tools.append(McpToolset(connection_params=server_params))
+
+    skill_toolset = build_skill_toolset()
+    if skill_toolset:
+        tools.append(skill_toolset)
+
+    return tools
 
 
 # ── 创建 Agent 实例 ──────────────────────────────
 
+def _before_model_callback(callback_context, llm_request):
+    """Inject project-local ADK skills before every model call."""
+    append_project_skills_to_request(llm_request)
+    capture_llm_request(llm_request)
+    return None
+
 assistant = Agent(
     name="assistant",
-    model=LiteLlm(model=DEEPSEEK_MODEL),
+    model=create_lite_llm(),
     instruction=SYSTEM_INSTRUCTION,
-    tools=_build_toolsets(),
+    tools=_build_tools(),
+    before_model_callback=_before_model_callback,
 )

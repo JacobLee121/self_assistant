@@ -26,6 +26,10 @@ from typing import Any
 from google.adk.events import Event
 from google.genai.types import Part
 
+from .llm_trace import clear_llm_requests
+from .llm_trace import consume_llm_requests
+from .langfuse_trace import LangfuseTraceExporter
+
 
 class AgentLogger:
     """按 Turn（对话回合）记录 ADK Agent 的完整执行过程。"""
@@ -42,6 +46,7 @@ class AgentLogger:
         # 当前 Turn 的暂存区
         self._current_turn: dict | None = None
         self._raw_events: list[Event] = []
+        self.langfuse = LangfuseTraceExporter()
 
     # ── 公开 API ────────────────────────────────────
 
@@ -61,6 +66,7 @@ class AgentLogger:
             "steps": [],
         }
         self._raw_events = []
+        clear_llm_requests()
 
     def log_event(self, event: Event) -> None:
         """记录原始 ADK 事件（暂存，end_turn 时分类）。"""
@@ -72,7 +78,7 @@ class AgentLogger:
             return {}
 
         turn = self._current_turn
-        steps = self._build_steps(self._raw_events)
+        steps = self._build_steps(self._raw_events, consume_llm_requests())
         turn["steps"] = steps
 
         self.turns.append(turn)
@@ -81,6 +87,7 @@ class AgentLogger:
 
         # 控制台摘要
         self._print_turn(turn)
+        self.langfuse.export_turn(session_id=self.session_id, turn=turn)
         return turn
 
     def save(self) -> Path:
@@ -117,8 +124,15 @@ class AgentLogger:
 
     # ── 事件分类引擎 ────────────────────────────────
 
-    def _build_steps(self, events: list[Event]) -> list[dict]:
+    def _build_steps(
+        self,
+        events: list[Event],
+        llm_inputs: list[dict] | None = None,
+    ) -> list[dict]:
         """将零散的 ADK 事件组装为带 input/output 的步骤列表。"""
+        llm_inputs = llm_inputs or []
+        llm_input_index = 0
+
         # 合并同属一个 content 的 parts（同一事件 = 同一次 LLM 响应）
         # 但一个事件可能同时包含 reasoning text + function_call
         flat: list[dict] = []
@@ -158,10 +172,14 @@ class AgentLogger:
             if item["kind"] in ("reasoning",):
                 # LLM 推理 → 开始一个 LLM_CALL 步骤
                 llm_step = self._build_llm_call(item, flat, i)
+                llm_step["input"] = _next_llm_input(llm_inputs, llm_input_index)
+                llm_input_index += 1
                 steps.append(llm_step)
                 i = llm_step["_end_index"] + 1
             elif item["kind"] == "tool_call":
                 llm_step = self._build_llm_call(item, flat, i)
+                llm_step["input"] = _next_llm_input(llm_inputs, llm_input_index)
+                llm_input_index += 1
                 steps.append(llm_step)
                 i = llm_step["_end_index"] + 1
             elif item["kind"] == "tool_result":
@@ -176,6 +194,8 @@ class AgentLogger:
             elif item["kind"] == "response":
                 # 独立最终回复（无工具调用时）
                 llm_step = self._build_llm_call(item, flat, i)
+                llm_step["input"] = _next_llm_input(llm_inputs, llm_input_index)
+                llm_input_index += 1
                 steps.append(llm_step)
                 i = llm_step["_end_index"] + 1
             else:
@@ -218,9 +238,7 @@ class AgentLogger:
 
         step: dict = {
             "type": "LLM_CALL",
-            "input": {
-                "description": "系统提示词 + 对话历史 + 用户消息及之前的工具结果",
-            },
+            "input": {},
             "output": {},
         }
 
@@ -338,3 +356,13 @@ def _safe_serialize(obj: Any) -> Any:
         return str(obj)
     except Exception:
         return f"<unserializable: {type(obj).__name__}>"
+
+
+def _next_llm_input(llm_inputs: list[dict], index: int) -> dict:
+    """Return a captured full LLM input or an explicit missing marker."""
+    if index < len(llm_inputs):
+        return llm_inputs[index]
+    return {
+        "missing": True,
+        "reason": "No captured LLM request snapshot for this LLM_CALL.",
+    }

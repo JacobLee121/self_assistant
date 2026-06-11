@@ -1,7 +1,8 @@
-"""通用 AI 助手 — DeepSeek API + Google ADK + 本地 MCP 服务器。
+"""通用 AI 助手 — Compass/DeepSeek + Google ADK + 本地 MCP/Skills。
 
 Agent 通过 McpToolset 连接本地 MCP 服务器，自动发现和调用其中的工具。
-工具能力由 agent/config.py 中的 MCP_SERVERS 配置决定，Agent 本身不绑定具体工具。
+同时通过 ADK SkillToolset 加载项目内 skills，向模型注入任务流程指南。
+工具能力由 agent/config.py 中的 MCP_SERVERS 和 skills/ 目录共同决定。
 
 每轮对话自动记录 LLM 推理和工具调用的完整过程到 logs/ 目录。
 """
@@ -10,6 +11,7 @@ import asyncio
 import os
 import sys
 import warnings
+from pathlib import Path
 
 # 静音 Google ADK 内部实验性功能的调试警告（不影响功能）
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
@@ -20,27 +22,30 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 
 # 启动时自动加载 .env 文件
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
 
 from agent.agent import assistant
+from agent.llm_config import resolve_llm_config
 from agent.logger import AgentLogger
+from agent.skills import load_project_skills
 
 # 全局日志记录器
 logger = AgentLogger(log_dir="logs")
 
 
 def check_api_key() -> bool:
-    """检查 API Key 是否已配置。"""
-    key = os.environ.get("DEEPSEEK_API_KEY")
+    """检查当前 LLM provider 所需的 API Key 是否已配置。"""
+    config = resolve_llm_config()
+    key = os.environ.get(config.api_key_env)
     if not key or key.startswith("your-"):
-        print("❌ 未检测到有效的 DEEPSEEK_API_KEY")
+        print(f"❌ 未检测到有效的 {config.api_key_env}")
         print()
         print("请按以下步骤配置：")
         print("  1. 复制 .env.example 为 .env")
         print("     cp .env.example .env")
         print("  2. 编辑 .env，填入你的 API Key")
-        print("     DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx")
-        print("  3. API Key 获取地址: https://platform.deepseek.com/api_keys")
+        print("     COMPASS_API_KEY=xxxxxxxxxxxxxxxx")
+        print("  3. 如需切回 DeepSeek，可设置 LLM_PROVIDER=deepseek")
         print()
         return False
     return True
@@ -68,11 +73,18 @@ async def main():
 
     # 3. 交互式查询循环
     print("=" * 60)
-    print("🤖 通用 AI 助手 (DeepSeek API + 本地 MCP 工具)")
+    llm_config = resolve_llm_config()
+    print(f"🤖 通用 AI 助手 ({llm_config.provider}: {llm_config.model} + 本地 MCP 工具)")
     print("=" * 60)
     print("已连接的 MCP 服务：")
     print("  • weather  — 天气查询 (get_weather)")
     print("  • route    — 路线规划 (get_route, list_cities)")
+    skills = load_project_skills()
+    if skills:
+        print("已加载的 ADK Skills：")
+        for skill in skills:
+            print(f"  • {skill.name}")
+    print(f"Langfuse Trace: {logger.langfuse.status}")
     print()
     print("输入 'quit' 退出")
     print("-" * 60)
